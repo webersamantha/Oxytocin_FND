@@ -2,7 +2,9 @@
 
 Here we provide the explanatory code for the manuscript "Salivary Oxytocin and Amygdalar Alterations in Functional Neurological Disorders - Weber & Stoffel et al., 2024"
 
-This code works with example data but won't produce the same results as reported in the paper, as the data can only be shared on request. This code should give a braod overview on how all the analyses in the manuscript were conducted. 
+This R code works with example data but won't produce the same results as reported in the paper, as the data can only be shared on request. This code should give a broad overview on how all the analyses in the manuscript were conducted. 
+
+In addition, the R Markdown is provided of which the HTML file shows all the plots and analyses that have been created with the original data.
 
 ## 1. Oxytocin, OXTR Methylation and Genotyping Data
 The paper contains various analyses all based on regression models conducted in R. The code here provides example data with the corresponding code in order to facilitate reproducibility of our analyses. For further questions, feel free to contact: samantha.weber@bli.uzh.ch or natascha.stoffel@unifr.ch
