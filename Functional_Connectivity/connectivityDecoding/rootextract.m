@@ -1,0 +1,1 @@
+function G=rootextract(R)R=R/sum(R);epsilonG=1e-10;G=(1/0.9).^(((length(R)-1)/2):-1:0);G=G/sum(G);encore=1;N=0;while encore	G=0.5*(deconv(R,rev(G))+G);	G=G/sum(G);	error=max(abs(R-conv(G,rev(G))));	if rem(N,1000)==999		disp(error)	end	encore=(error>epsilonG&N<10000);	N=N+1;end
