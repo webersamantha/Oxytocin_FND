@@ -1,0 +1,1101 @@
+---
+title: "Oxytocin in Functional Neurological Disorders"
+author:
+- name: Samantha Weber
+  affiliation: Department of Neurology, Psychosomatic Medicine Unit, University Hospital Inselspital, 3010 Bern, Switzerland
+
+  email: samantha.weber@bli.uzh.ch
+package: packageName
+date: "`r format(Sys.time(), '%d/%m/%y')`"
+numbersections: true
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r load_data, include=FALSE, message=FALSE, echo = FALSE, warning=FALSE}
+
+#Load packages: 
+#Set path for outputfiles
+library(ISwR)# this is based book introductory statistics with R
+library(MASS)
+library(ggplot2)
+library(Hmisc)
+library(plotly) ## producing report e.g. in pdf, creates good outputs/summaries
+library(readxl)
+library(car) # Levene's test with one independent variable
+library(lawstat)
+library(ggpubr)
+library(rstatix)
+library(lme4)
+library(plyr)
+library(multcomp)
+library(dplyr)
+library(tidyverse)
+library(dplyr)
+library(SNPassoc)
+library(ggpubr)
+library(corrplot)
+library(Hmisc)
+library(mediation)
+library(ggtext)
+
+
+#####IMPORTANT: CHANGE PATH HERE AND THE REST OF THE SCRIPT WILL WORK ##########
+# Define the folder, in which you save your plots
+setwd("/Volumes/T7_Samantha/Analyses/Oxytocin") #set path for outputfiles 
+#setwd("D:\\Analyses\\Longitudinal\\Saliva") #Windows
+
+# Read in the data
+#Location where data is saved on sam's SSD:
+OTraw <- read_excel("00_Data/Liste_Oxytocin_Analysis_SamanthaWeber_T1.xlsx")
+OTraw<-OTraw[-c(2,3)]
+names(OTraw)[2]<-"Oxytocin"
+OTraw$ID <- substring(OTraw$ID, 2)
+names(OTraw)[1]<-"p_code"
+OTraw$p_code<-revalue(OTraw$p_code, c("48"="048","60"="060","46"="046","63"="063","61"="061","50"="050","0"="000","28"="028","16"="016"))
+
+# Load BioGen Data
+# Path where data is saved on Sam's ssd: 
+BioGen <- read_excel("00_Data/FinalResults_BioGen.xlsx")
+
+
+brain <- read_excel('00_Data/ROI_catROI_aal3_Vgm.xlsx')
+
+
+names(brain)
+# Oxytonergic system: Hippocampus, Amygdala, Caudate, Ncl. Accumbens
+brain<-select(brain,p_code, TIV, rAMYG, lAMYG, rHIP, lHIP, rCAU, lCAU, rNacc, lNacc, rINS, lINS)
+brain$p_code <- substring(brain$p_code, 2)
+brain$AMYG<-brain$rAMYG+brain$lAMYG
+brain$HIPP<-brain$rHIP+brain$lHIP
+brain$NAcc<-brain$rNacc+brain$lNacc
+brain$CAU<-brain$rCAU+brain$lCAU
+brain$INS<-brain$rINS+brain$lINS
+#brain<-dplyr::select(brain, p_code, TIV, AMYG:INS)
+brain$p_code<-revalue(brain$p_code, c("48"="048","60"="060","46"="046","63"="063","61"="061","50"="050","0"="000","28"="028","16"="016"))
+
+
+# Save covariates as factors
+BioGen$p_code<-as.character(BioGen$p_code)
+BioGen$group<-as.factor(BioGen$group)
+BioGen$gender<-as.factor(BioGen$gender)
+BioGen$psychMed<-as.factor(BioGen$psychMed)
+BioGen$ID<-as.character(BioGen$p_code)
+BioGen$menstrual_cycle_at_Saliva<-as.factor(BioGen$menstrual_cycle_at_Saliva)
+BioGen$menopause<-as.factor(BioGen$menopause)
+BioGen$contraception<-as.factor(BioGen$contraception)
+BioGen$smoke<-as.factor(BioGen$smoke)
+
+# select only those columns that are interesting
+BioGen<-dplyr::select(BioGen, p_code, group, gender, age, psychMed, smoke, contraception, menopause, menstrual_cycle_at_Saliva,
+                      symptoms, pss, bdi, stai1, stai2, ctq_emoab, ctq_physab, ctq_sexab, ctq_emoneg, ctq_physneg, DurationSymptoms, cgi_1, sfmdrs)
+names(BioGen)[9]<-"MensCycle"
+
+
+## Calculate DAY OF MENSTRUAL CYCLE
+data <- read_excel("00_Data/FinalResults_BioGen.xlsx")
+#data <- read_excel("L:\\NRLK_FND\\Experiments\\Analysed Results\\18 - BioGen\\01_BioGen_FND_Samantha\\07_Oxytocin\\00_Data\\FinalResults_BioGen.xlsx")
+
+data$gender<-as.factor(data$gender)
+data$date_saliva<-as.Date(data$date_saliva)
+data$period<-as.Date(data$period)
+
+#Calculate the exact day of the period
+data$date_diff<-as.Date(as.character(data$date_saliva), format="%Y-%m-%d")-
+  as.Date(as.character(data$period), format="%Y-%m-%d")
+
+#We add +1 because oxytocin samples were taken one day later in general. 
+data$date_diff<-data$date_diff+1
+
+# We set all males to 0
+data$date_diff[is.na(data$date_diff)] <- 5
+
+# We set all menopauses and irregular cycles to 0 too
+data$date_diff[data$date_diff > 35] <- 5
+
+data<-dplyr::select(data, p_code, date_diff)
+
+BioGen<-merge(BioGen,data, by = "p_code", x.all = TRUE, y.all = TRUE)
+BioGen$p_code<-revalue(BioGen$p_code, c("48"="048","60"="060","46"="046","63"="063","61"="061","50"="050","0"="000","28"="028","16"="016"))
+
+#Change to "flag high" if in follicular phase or using contraception
+BioGen$FlagHigh <- ifelse(BioGen$MensCycle == "ovulation" | BioGen$contraception == 1, 'high','low')
+BioGen$FlagHigh<-as.factor(BioGen$FlagHigh)
+
+# merge OT and BioGen by rownames to have everything in one dataframe
+subset(OTraw, !(p_code %in% BioGen$p_code)) 
+
+OT <- merge(OTraw, BioGen, by = 'p_code', all.y = FALSE, all.x = TRUE) #joined data
+
+```
+
+ 
+
+# Introduction
+
+We collected saliva samples before and after entering the scanner. Those samples were then poured together for OT analysis.
+
+
+```{r OT count table, echo=FALSE, message=FALSE, warning=FALSE}
+
+# People with OT data
+print('Number of subjects with OT Data at T1: ')
+table(OT$group)
+print(' ')
+
+OTbrain<-merge(OT,brain, by = 'p_code')
+
+print('Mean Age at T1: ')
+
+OT%>%
+  group_by(group) %>%
+  get_summary_stats(age, type = "mean_sd")
+res<-t.test(OT$age[OT$group == "FND"], OT$age[OT$group == "HC"]) # HC group is significantly younger than FND P = 0.02
+print('Significantly different: ')
+res$p.value
+
+```
+
+## Oxytocin FND vs. HC
+
+We first visualize the data. 
+
+```{r OT plots, echo=FALSE, message=FALSE, warning=FALSE}
+# First we define our questionnaires of interest
+
+## Plot Data
+OTplot<-ggplot(OT, aes(x=group, y=Oxytocin, fill=group)) +
+  geom_boxplot()+
+  theme_classic()+  
+  scale_fill_manual(values = c("#868686FF" ,"#2BB08E"))+ 
+  theme(legend.position = "none", axis.title.y = element_blank(), 
+        axis.title.x = element_blank()) +
+  ggtitle("Oxytocin pg/ml") + theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))+  
+  theme(axis.title.x=element_blank(),axis.text.y = element_text(size = 14, face = "bold"), 
+        axis.text.x = element_text(size = 18, face = "bold"), plot.title = element_text(hjust = 0.5))+ 
+  stat_compare_means(label = "p.signif", comparisons = list(c("HC", "FND")), label.x=1)+ 
+  geom_jitter(shape=16, position=position_jitter(0.2))
+
+OTplot
+
+
+```
+
+</br>
+
+### Statistical Analysis OT FND vs. HC
+
+I applied an ANOVA on the fitted data (using lm), so that we correct/include covariates, which are: 
+
+<li> Gender</li>
+<li> Psychotropic Medication </li>
+<li> Bdi </li>
+<li> STAI-1 </li>
+<li> Menstrual Cycle </li>
+<li> Contraception </li>
+<li> Menopause </li>
+<li> Age </li>
+
+
+```{r Analysis OT , echo=FALSE, message=FALSE, warning=FALSE}
+OTlm <- lm(formula = Oxytocin ~ group  + gender + psychMed +bdi +stai1 + date_diff + contraception +menopause + age,
+           data = OT) 
+OTAov <- aov(OTlm)
+summary(OTAov) # 
+
+```
+
+</br>
+There is no significant group difference in FND vs. HC. Also, covariates do not seem to affect the results strongly. 
+</br>
+
+# Genetic association study
+
+Previously, we saw that rs53576 was significantly associated to the diagnosis of FND (= risk factor). We now first replicate this in the subset of our sample. 
+
+We start with quality control. 
+
+1. Hardy Weinberg Equilibrium 
+```{r Analysis HWE , echo=FALSE, message=FALSE, warning=FALSE}
+
+df.gen<-read.delim("/Volumes/T7_Samantha/Analyses/Oxytocin/00_Data/Genotyping.txt", sep="\t", na.string="NN", header=TRUE)
+df.gen<-df.gen[-c(1)]
+names(df.gen)[1]<-"p_code"
+df.gen$p_code<-as.character(df.gen$p_code)
+df.gen$p_code<-revalue(df.gen$p_code, c("48"="048","60"="060","46"="046","63"="063","61"="061","50"="050","0"="000","28"="028","16"="016"))
+
+# Change insertion/deletion into a format that is readable by R package
+df.gen$rs1799732<-ifelse(df.gen$rs1799732=='G.GG', 'GI', ifelse(df.gen$rs1799732=='GG', 'GG', NA)) 
+
+# Fusion of genotype and phenotype data per individual by RID
+df_all<-merge(df.gen, OT, by="p_code",all.x=FALSE, all.y=TRUE)
+
+# Create ctq total score
+attach(df_all)
+df_all$ctq<-ctq_emoab+ctq_physab+ctq_sexab+ctq_emoneg+ctq_physneg
+# we first specify which columns contain the genotyping data, and then what alleles they are without separation
+
+myData_S<-setupSNP(data=df_all,colSNPs=2:11,sep="")
+
+#Make individual dataframes
+df_FND<-filter(df_all, group =="FND")
+df_HC<-filter(df_all, group =="HC")
+
+myData_FND<-setupSNP(data=df_FND, colSNPs=2:11,sep="")
+myData_HC<-setupSNP(data=df_HC,colSNPs=2:11,sep="")
+
+#Hardy-Weinberg Equilibrium Test ----------------------------------------
+# CALCULATE frequency of genotypes, alleles y do HWE test. 
+# summary view of various aspects of SNP quality control
+summary_S<-summary(myData_S)
+
+```
+All fine, except of rs1800532. 
+
+Now we run the association study. These are our genes: 
+<li> TPH2 rs4570625 </li>
+<li> TPH1 rs1800532</li>
+<li> BDNF rs6265</li>
+<li> BDNF rs1491850</li>
+<li> DRD4 rs3758653</li>
+<li> OXTR rs2254298</li>
+<li> OXTR rs53576</li>
+<li> DRD2 rs1799732</li>
+<li> FKBP51 rs1360780</li>
+<li> FKBP52 rs3800373</li>
+<li> TPH1 rs1800532</li>
+
+Covariates are: 
+<li> Age</li>
+<li> Gender </li>
+<li> CTQ total score </li>
+<li> BDI</li>
+<li> STAI-2</li>
+
+We first give an overview over all p-values. 
+
+```{r Analysis Assoc , echo=FALSE, message=FALSE, warning=FALSE}
+
+myData_S$group2<-myData_S$group
+myData_S$group<-revalue(myData_S$group, c("FND"="1","HC"="0"))
+myData_S$group<-as.factor(myData_S$group)
+#re-order factor levels for region
+myData_S$group <- factor(myData_S$group, levels=c('0', '1'))
+
+# Check all genes at once
+asoc_S1<-WGassociation(group~1+ age + gender + ctq + bdi + stai2, data=myData_S, model=c("codominant","log-additive","dominant","recessive"),genotypingRate=80)
+asoc_S1 #Interpretation: we see that rs53576 has a significant association whith group, when using the recessive model (homozygote for "bad" allele)
+WGstats(asoc_S1)# to see the details of the regression
+# only rs53576 looks interesting
+
+```
+Only ***rs53576*** looks interesting. There might be some signifcances in others, but the allele distribution across the groups is not significant (e.g., when it would be 3 vs. 50).
+
+## Genetic association between genotype and Oxytocin
+I run a linear regression analysis with Oxytocin (OT) as dependent variable to see if there is association between genotype and OT. Adding again the covariates on menstrual cycle, menopause and contraception. 
+
+```{r Analysis Assoc OT, echo=FALSE, message=FALSE, warning=FALSE}
+
+asoc_OT<-WGassociation(Oxytocin~1+ gender + bdi +psychMed + stai2 + date_diff + menopause + contraception + age + ctq,data=myData_S, model=c("codominant","dominant","recessive"),genotypingRate=80)
+
+asoc_OT # NO associations between OT and genotype
+
+
+logistic_DRD2<-association(Oxytocin~rs3758653 + age + date_diff + menopause + contraception + age + ctq + bdi + stai2,data=myData_S)
+logistic_DRD2 # still significant
+
+```
+We see a significant association with rs3758653. However, when we have a closer look, we see that the results are driven by 4 subjects that are carring the C/C variation. So there results are ***not biologically significant***.
+
+Next we can also do it group-specific:
+
+```{r Analysis Assoc OT Groups, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("Association between OT and genotypes in FND: ")
+asoc_OT<-WGassociation(Oxytocin~1+ gender + bdi +psychMed + stai2 + date_diff + menopause + contraception + age + ctq,data=myData_FND, model=c("codominant","dominant","recessive"),genotypingRate=80)
+
+asoc_OT # NO associations between OT and genotype
+
+
+print("Association between OT and genotypes in HC: ")
+asoc_OT<-WGassociation(Oxytocin~1+ gender + bdi + stai2 + date_diff + menopause + contraception + age + ctq,data=myData_HC, model=c("codominant","dominant","recessive"),genotypingRate=80)
+
+asoc_OT # NO associations between OT and genotype
+
+
+```
+There is nothing significant when we split into the two groups (except of rs3758653, which we found to be only 4 subjects). This means that there is no association between genotype and salivary OT. 
+***Caveat*** Later we do an analysis where we split into the three genotypes for rs53576, where we see results. 
+
+
+# Methylation Data on OXTR 
+
+We analysed 5 amplicons of the OXTR receptor. We take the mean of them, which gives us an average methylation rate of the OXTR promoter region. This is standard and has also been done like this in Apazoglou et al. 
+
+We again first visualize the data. We first replicate Apazoglou et al., who just run a simple student's t-test on the mean methylation data. Then we statistically compare them between groups using again the ANOVA on the fitted data. 
+
+Covariates used: 
+<li> Gender</li>
+<li> Psychotropic Medication </li>
+<li> Bdi </li>
+<li> STAI-1 </li>
+<li> Menstrual Cycle </li>
+<li> Contraception </li>
+<li> Menopause </li>
+<li> Age </li></br>
+
+
+```{r Plot Methylation, echo=FALSE, message=FALSE, warning=FALSE}
+
+m1 <- read_excel("/Volumes/T7_Samantha/Analyses/Oxytocin/00_Data/Resultados_PL1-2_SAMW_5_OXTR_02.xlsx")
+names(m1)[1]<-"p_code"
+m1$p_code <- substring(m1$p_code, 2)
+m1$p_code<-revalue(m1$p_code, c("48"="048","46"="046","63"="063","61"="061","50"="050","28"="028","16"="016"))
+
+m1$OXTR_CpG_2<-as.numeric(m1$OXTR_CpG_2)
+m1$OXTR_CpG_sum<-(m1$OXTR_CpG_2 + m1$OXTR_CpG_5 + m1$OXTR_CpG_6.7 + m1$OXTR_CpG_8)/4
+defdata_filt_met1<-merge(df_all,m1, by="p_code",all.x=TRUE, all.y=FALSE)
+
+
+#Make data long, in case you want to analyse the individual amplicons along
+defdata_filt_met2<-defdata_filt_met1 %>% pivot_longer(cols = starts_with("OXTR_"), 
+                                                      names_to = "OXTR_CpGs",
+                                                      values_to = "oxtr_met")
+
+dfOT<-defdata_filt_met1
+
+OXTRplot<-ggplot(dfOT, aes(x=group, y=OXTR_CpG_sum, fill=group)) +
+  geom_boxplot()+
+  theme_classic()+  
+  scale_fill_manual(values = c("#868686FF" ,"#2BB08E"))+ 
+  theme(legend.position = "none", axis.title.y = element_blank(), 
+        axis.title.x = element_blank()) +
+  ggtitle("OXTR Methylation [%]") + theme(plot.title = element_text(hjust = 0.5, size = 20, face = "bold"))+  
+  theme(axis.title.x=element_blank(),axis.text.y = element_text(size = 14, face = "bold"), 
+        axis.text.x = element_text(size = 18, face = "bold"), plot.title = element_text(hjust = 0.5))+ 
+  stat_compare_means(label = "p.signif", comparisons = list(c("HC", "FND")), label.x=1)+ 
+  geom_jitter(shape=16, position=position_jitter(0.2))
+
+OXTRplot
+
+print("Replication Apazoglou et al.:")
+res_meth<-t.test(dfOT$OXTR_CpG_sum[dfOT$group == "FND"], dfOT$OXTR_CpG_sum[dfOT$group == "HC"])
+res_meth
+
+print("ANOVA on fitted data using Covariates.:")
+
+OXTRlm <- aov(lm(formula = Oxytocin~OXTR_CpG_sum*group + psychMed +bdi +stai1 + date_diff + contraception + menopause + age,data = dfOT) )
+summary(OXTRlm)
+
+```
+***FINDINGS:*** We have a significant OXTR Methylation x Group effect on salivary oxytocin. We want to decouple this effect by looking at the groups individually.
+We see that the effects of OXTR Methylation goes in the different direction in FND versus HC. 
+
+```{r Plot Methylation Group Specific, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(viridis)
+
+# Set a color-blind friendly palette from viridis
+my_palette <- viridis_pal(option = "D")(3)
+
+ggscatter(dfOT, 
+          x = "Oxytocin", 
+          y = "OXTR_CpG_sum",
+          fill = "group", 
+          color = "group",
+          shape = "group",  # Use the 'group' variable for shapes
+          add = "reg.line", 
+          conf.int = TRUE, 
+          cor.coef = FALSE, 
+          cor.method = "spearman",
+          palette = my_palette,  # Set the custom color palette
+          xlab = "Oxytocin pg/ml", 
+          ylab = "OXTR Methylation [%]") +
+ # stat_cor(aes(color = group), method = "spearman")
+    theme_minimal() +
+  theme(legend.position = "right") +
+  guides(fill = guide_legend(title = "Group"))
+
+
+```
+
+## Interaction between OT, OXTR Methylation and Genotype
+As a next step, we investigate some more interaction models. We have the following potential oxytocin related data: 
+
+<li> Group</li>
+<li> rs53576</li>
+<li> OXTR Methylation</li>
+<li> Salivary Oxytocin</li> </br>
+
+We can make combinations of interactions with all of them. Mostly we find significant results. We just have to think what actually makes sense. Here some of the results: 
+
+```{r More interactions, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("OXTR Methylation ~ Group*genotype with Oxytocin as covariate")
+OXTRlm <- aov(lm(formula = OXTR_CpG_sum ~ group*rs53576+ Oxytocin +  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm) 
+
+dfOT_FND<-filter(dfOT, group == "FND")
+dfOT_HC<-filter(dfOT, group == "HC")
+
+
+plota <- ggplot(dfOT_FND, aes_string(x = "rs53576", y = "Oxytocin", fill = "rs53576")) +
+  geom_violin(show.legend = FALSE, alpha = 0.5, trim = FALSE) +
+  geom_boxplot(width = 0.2, color = "black", fill = "white", show.legend = FALSE, outlier.shape = NA) +
+  ylim(0, 25) +
+  scale_fill_manual(values = c("#440154FF", "#440154FF", "#440154FF")) +
+  labs(y = "Oxytocin [pg/ml]", x = "rs53576 genotype", title = "<b>A</b> Oxytocin FND") +
+  theme_classic() +
+  theme(plot.title = element_markdown())
+
+plotb <- ggplot(dfOT_HC, aes_string(x = "rs53576", y = "Oxytocin", fill = "rs53576")) +
+  geom_violin(show.legend = FALSE, alpha = 0.5, trim = FALSE) +
+  geom_boxplot(width = 0.2, color = "black", fill = "white", show.legend = FALSE, outlier.shape = NA) +
+  ylim(0, 25) +
+  scale_fill_manual(values = c("#21908CFF", "#21908CFF", "#21908CFF")) +
+  labs(y = "Oxytocin [pg/ml]", x = "rs53576 genotype", title = "<b>B</b> Oxytocin Controls") +
+  theme_classic() +
+  theme(plot.title = element_markdown())
+
+plotc <- ggplot(dfOT_FND, aes_string(x = "rs53576", y = "OXTR_CpG_sum", fill = "rs53576")) +
+  geom_violin(show.legend = FALSE, alpha = 0.5, trim = FALSE) +
+  geom_boxplot(width = 0.2, color = "black", fill = "white", show.legend = FALSE, outlier.shape = NA) +
+  ylim(0.2, 0.8) +
+  scale_fill_manual(values = c("#440154FF", "#440154FF", "#440154FF")) +
+  labs(y = "OXTR Methylation [%]", x = "rs53576 genotype", title = "<b>C</b> OXTR Methylation FND") +
+  theme_classic() +
+  theme(plot.title = element_markdown()) +
+  stat_compare_means(label = "p.signif", comparisons = list(c("GG", "AA"), c("GA", "AA")), label.x = 1, label.y = c(0.6, 0.7))
+
+plotd <- ggplot(dfOT_HC, aes_string(x = "rs53576", y = "OXTR_CpG_sum", fill = "rs53576")) +
+  geom_violin(show.legend = FALSE, alpha = 0.5, trim = FALSE) +
+  geom_boxplot(width = 0.2, color = "black", fill = "white", show.legend = FALSE, outlier.shape = NA) +
+  ylim(0.2, 0.8) +
+  scale_fill_manual(values = c("#21908CFF", "#21908CFF", "#21908CFF")) +
+  labs(y = "OXTR Methylation [%]", x = "rs53576 genotype", title = "<b>D</b> OXTR Methylation Controls") +
+  theme_classic() +
+  theme(plot.title = element_markdown())
+
+
+ggarrange(plota, plotb, plotc, plotd)
+
+```
+</br>
+Particularly, the Genotype seems to have an effect on OXTR Methylation in FND. Let's compare it statistically.</br>
+**AA carriers have higher OXTR Methylation in comparison to GA or GG. While there are no differences between GA or GG. This effect is not found in Oxytocin, nor in healthy controls.**
+
+```{r OXTR x Genotype FND, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("OXTR Methylation ~ genotype in FND only")
+OXTRlm <- aov(lm(formula = OXTR_CpG_sum ~ rs53576 +  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,data = dfOT_FND))
+
+summary(OXTRlm) 
+
+TukeyHSD(OXTRlm, which = "rs53576")
+
+print("Oxytocin ~ genotype in FND only")
+OTlm <- aov(lm(formula = Oxytocin ~ rs53576 +  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,data = dfOT_FND))
+
+summary(OTlm) 
+
+TukeyHSD(OTlm, which = "rs53576")
+
+
+print("OXTR Methylation ~ genotype in HC only")
+OXTRlm <- aov(lm(formula = OXTR_CpG_sum ~ rs53576 +bdi +stai1 + date_diff + contraception + menopause + age,data = dfOT_HC))
+
+summary(OXTRlm) 
+
+TukeyHSD(OXTRlm, which = "rs53576")
+
+print("Oxytocin ~ genotype in HC only")
+OTlm <- aov(lm(formula = Oxytocin ~ rs53576 +bdi +stai1 + date_diff + contraception + menopause + age,data = dfOT_HC))
+
+summary(OTlm) 
+
+TukeyHSD(OTlm, which = "rs53576")
+
+
+
+
+```
+# The effect of Childhood Trauma
+
+As a next step we investigate how childhood trauma might interact with OT, OXTR Methlyation and genotype. I acknowledge that the term "traumatized" versus "no-traumatized" is maybe not optimal, but it refers to the CTQ total score cut off of > 35. 
+
+```{r Childhood Trauma, echo=FALSE, message=FALSE, warning=FALSE}
+
+CTQ_high<-filter(dfOT, ctq > 35)
+CTQ_low<-filter(dfOT, ctq < 36)
+
+CTQ_all<-CTQ_high
+CTQ_all$group_ctq<-'traumatized'
+CTQ_low$group_ctq<-'non-traumatized'
+CTQ_all<-rbind(CTQ_all,CTQ_low)
+print("Number of traumatized versus non-traumatized:")
+table(CTQ_all$group_ctq, CTQ_all$group)
+
+CTQ_all$group_ctq<-as.factor(CTQ_all$group_ctq)
+OT_FND<-filter(CTQ_all, group =="FND")
+OT_HC<-filter(CTQ_all, group =="HC")
+
+print("Association OT with CTQ stratification, OXTR Methylation and Genotype in FND:")
+OXTRlm <- aov(lm(formula =  Oxytocin ~ group_ctq* OXTR_CpG_sum*rs53576 + psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = OT_FND))
+summary(OXTRlm)
+print("Association OT with CTQ stratification, OXTR Methylation and Genotype in HC:")
+OXTRlm <- aov(lm(formula =  Oxytocin ~ group_ctq* OXTR_CpG_sum*rs53576 +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = OT_HC))
+summary(OXTRlm)
+
+
+```
+
+**Results:** We see that not in FND nor in HC there is an association between CTQ stratification group. So no differences in OT, OXTR Methylation or genotype depending on whether you have been CTQ total yes or no. We can look into the individual subscales, just to be sure. 
+
+Let's plot it, independent of genotype. We plot correlations with each CTQ subtype and OXTR Methylation (left) as well as Oxytocin (right).
+However, there are no significant correlations between OXTR Methylation/Oxytocin and the different childhood traumata. 
+```{r CTQ Plots, echo=FALSE, message=FALSE, warning=FALSE}
+
+a <- ggscatter(dfOT, x = "ctq_emoab", y = "OXTR_CpG_sum", fill = "group", color = "group",
+               add = "reg.line", conf.int = TRUE, 
+               cor.coef = FALSE, cor.method = "spearman",
+               xlab = "CTQ - Emotional Abuse", ylab = "OXTR Methylation [%]") + 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+b<-ggscatter(dfOT, x = "ctq_emoab", y = "Oxytocin",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Abuse", ylab = "Oxytocin [ng/ml]") + 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+c<-ggscatter(dfOT, x = "ctq_emoneg", y = "OXTR_CpG_sum",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Neglect", ylab = "OXTR Methylation [%]") + 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+d<-ggscatter(dfOT, x = "ctq_emoneg", y = "Oxytocin",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Neglect", ylab = "Oxytocin [ng/ml]") + 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+
+e<-ggscatter(dfOT, x = "ctq_physab", y = "OXTR_CpG_sum",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Abuse", ylab = "OXTR Methylation [%]")+ 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+
+f<-ggscatter(dfOT, x = "ctq_physab", y = "Oxytocin",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Abuse", ylab = "Oxytocin [ng/ml]") + 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+
+g<-ggscatter(dfOT, x = "ctq_physneg", y = "OXTR_CpG_sum",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Neglect", ylab = "OXTR Methylation [%]") + 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+
+
+h<-ggscatter(dfOT, x = "ctq_physneg", y = "Oxytocin",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Neglect", ylab = "Oxytocin [ng/ml]") + 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+
+i<-ggscatter(dfOT, x = "ctq_sexab", y = "OXTR_CpG_sum",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Sexual Abuse", ylab = "OXTR Methylation [%]")+ 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+j<-ggscatter(dfOT, x = "ctq_sexab", y = "Oxytocin",fill = "group", color = "group",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Sexual Abuse", ylab = "Oxytocin [ng/ml]") + 
+  stat_cor(aes(color = group), method = "spearman", 
+           label.x = Inf, label.y = c(Inf, Inf), 
+           hjust = 1.1, vjust = c(2, 4)) + 
+  scale_fill_manual(values = c("#440154FF", "#21908CFF")) +
+  scale_color_manual(values = c("#440154FF", "#21908CFF"))
+
+ggarrange(a,b)
+ggarrange(c,d)
+ggarrange(e,f)
+ggarrange(g,h)
+ggarrange(i,j)
+
+
+
+```
+
+## CTQ Emotional Neglect
+
+There is no significant association with childhood emotional neglect, nor an interaction effect.  </br>
+  
+```{r CTQ Emotional Neglect, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("Oxytocin ~ Emotional Neglect *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = Oxytocin ~ ctq_emoneg*group+rs53576+OXTR_CpG_sum +  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+print("Oxytocin ~ Emotional Neglect *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = OXTR_CpG_sum ~ ctq_emoneg*group+rs53576+ Oxytocin+  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+#Emotional Neglect
+a <- ggscatter(dfOT_FND, x = "ctq_emoneg", y = "OXTR_CpG_sum", fill = "rs53576", color = "rs53576",
+               add = "reg.line", conf.int = TRUE, 
+               cor.coef = FALSE, cor.method = "spearman",
+               xlab = "CTQ - Emotional Neglect", ylab = "OXTR Methylation [%]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.59, 0.56, 0.53), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.6)  # Extend y-axis to 0.6
+b<-ggscatter(dfOT_HC, x = "ctq_emoneg", y = "OXTR_CpG_sum",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Neglect", ylab = "OXTR Methylation [%]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.66, 0.63, 0.60), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.7)  # Extend y-axis to 0.6
+
+c<-ggscatter(dfOT_FND, x = "ctq_emoneg", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Neglect", ylab = "Oxytocin [pg/ml]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+
+d<-ggscatter(dfOT_HC, x = "ctq_emoneg", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Neglect", ylab = "Oxytocin [pg/ml]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+
+ggarrange(a,b,c,d)
+
+
+
+```
+
+## CTQ Emotional Abuse
+
+There is no interesting significant association with childhood emotional Abuse, nor an interaction effect.  </br> There is a negative correlation in healthy controls between Oxytocin levels and emotional abuse in GG carriers. 
+```{r CTQ Emotional Abuse, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("Oxytocin ~ Emotional Abuse *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = Oxytocin ~ ctq_emoab*group+rs53576+OXTR_CpG_sum +  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+print("Oxytocin ~ Emotional Abuse *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = OXTR_CpG_sum ~ ctq_emoab*group+rs53576+ Oxytocin+  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+a <- ggscatter(dfOT_FND, x = "ctq_emoab", y = "OXTR_CpG_sum", fill = "rs53576", color = "rs53576",
+               add = "reg.line", conf.int = TRUE, 
+               cor.coef = FALSE, cor.method = "spearman",
+               xlab = "CTQ - Emotional Abuse", ylab = "OXTR Methylation [%]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.59, 0.56, 0.53), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.6)  # Extend y-axis to 0.6
+
+b<-ggscatter(dfOT_HC, x = "ctq_emoab", y = "OXTR_CpG_sum",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Abuse", ylab = "OXTR Methylation [%]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.66, 0.63, 0.60), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.7)  # Extend y-axis to 0.6
+
+c<-ggscatter(dfOT_FND, x = "ctq_emoab", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Abuse", ylab = "Oxytocin [pg/ml]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+
+d<-ggscatter(dfOT_HC, x = "ctq_emoab", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Emotional Abuse", ylab = "Oxytocin [pg/ml]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+ggarrange(a,b,c,d)
+
+
+
+
+```
+
+## CTQ Physical Neglect
+
+There is no significant association with childhood Physical Neglect, nor an interaction effect.  </br> 
+```{r CTQ Physical Neglect, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("Oxytocin ~ Physical Neglect *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = Oxytocin ~ ctq_physneg*group+rs53576+OXTR_CpG_sum +  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+print("Oxytocin ~ Physical Neglect *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = OXTR_CpG_sum ~ ctq_physneg*group+rs53576+ Oxytocin+  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+a <- ggscatter(dfOT_FND, x = "ctq_physneg", y = "OXTR_CpG_sum", fill = "rs53576", color = "rs53576",
+               add = "reg.line", conf.int = TRUE, 
+               cor.coef = FALSE, cor.method = "spearman",
+               xlab = "CTQ - Physical Neglect", ylab = "OXTR Methylation [%]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.59, 0.56, 0.53), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.6)  # Extend y-axis to 0.6
+
+b<-ggscatter(dfOT_HC, x = "ctq_physneg", y = "OXTR_CpG_sum",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Neglect", ylab = "OXTR Methylation [%]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.66, 0.63, 0.60), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.7)  # Extend y-axis to 0.6
+
+c<-ggscatter(dfOT_FND, x = "ctq_physneg", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Neglect", ylab = "Oxytocin [pg/ml]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+
+d<-ggscatter(dfOT_HC, x = "ctq_physneg", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Neglect", ylab = "Oxytocin [pg/ml]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+ggarrange(a,b,c,d)
+```
+
+
+
+## CTQ Physical Abuse
+
+There is no significant association with childhood Physical Abuse, nor an interaction effect.  </br> 
+```{r CTQ Physical Abuse, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("Oxytocin ~ Physical Abuse *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = Oxytocin ~ ctq_physab*group+rs53576+OXTR_CpG_sum +  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+print("Oxytocin ~ Physical Abuse *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = OXTR_CpG_sum ~ ctq_physab*group+rs53576+ Oxytocin+  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+a <- ggscatter(dfOT_FND, x = "ctq_physab", y = "OXTR_CpG_sum", fill = "rs53576", color = "rs53576",
+               add = "reg.line", conf.int = TRUE, 
+               cor.coef = FALSE, cor.method = "spearman",
+               xlab = "CTQ - Physical Abuse", ylab = "OXTR Methylation [%]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.59, 0.56, 0.53), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.6)  # Extend y-axis to 0.6
+
+b<-ggscatter(dfOT_HC, x = "ctq_physab", y = "OXTR_CpG_sum",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Abuse", ylab = "OXTR Methylation [%]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.66, 0.63, 0.60), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.7)  # Extend y-axis to 0.6
+
+c<-ggscatter(dfOT_FND, x = "ctq_physab", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Abuse", ylab = "Oxytocin [pg/ml]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+
+d<-ggscatter(dfOT_HC, x = "ctq_physab", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Physical Abuse", ylab = "Oxytocin [pg/ml]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+ggarrange(a,b,c,d)
+```
+
+## CTQ Sexual Abuse
+
+There is no significant association with childhood Sexual Neglect, nor an interaction effect.  </br> 
+```{r CTQ Sexual Abuse, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("Oxytocin ~ Sexual Abuse *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = Oxytocin ~ ctq_sexab*group+rs53576+OXTR_CpG_sum +  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+print("Oxytocin ~ Sexual Abuse *group + with genotype and methlyation as covariate")
+OXTRlm <- aov(lm(formula = OXTR_CpG_sum ~ ctq_sexab*group+rs53576+ Oxytocin+  psychMed +bdi +stai1 + date_diff + contraception + menopause + age,
+             data = dfOT))
+
+summary(OXTRlm)
+
+a <- ggscatter(dfOT_FND, x = "ctq_sexab", y = "OXTR_CpG_sum", fill = "rs53576", color = "rs53576",
+               add = "reg.line", conf.int = TRUE, 
+               cor.coef = FALSE, cor.method = "spearman",
+               xlab = "CTQ - Sexual Abuse", ylab = "OXTR Methylation [%]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.59, 0.56, 0.53), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.6)  # Extend y-axis to 0.6
+
+b<-ggscatter(dfOT_HC, x = "ctq_sexab", y = "OXTR_CpG_sum",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Sexual Abuse", ylab = "OXTR Methylation [%]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(0.66, 0.63, 0.60), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0.3, 0.7)  # Extend y-axis to 0.6
+
+c<-ggscatter(dfOT_FND, x = "ctq_sexab", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Sexual Abuse", ylab = "Oxytocin [pg/ml]", title = "FND Patients") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+
+d<-ggscatter(dfOT_HC, x = "ctq_sexab", y = "Oxytocin",fill = "rs53576", color = "rs53576",
+             add = "reg.line", conf.int = TRUE, 
+             cor.coef = FALSE, cor.method = "spearman",
+             xlab = "CTQ - Sexual Abuse", ylab = "Oxytocin [pg/ml]", title = "Healthy Controls") + 
+  stat_cor(aes(color = rs53576), method = "spearman", 
+           label.x = Inf, label.y = c(25, 23, 21), # Position labels higher
+           hjust = 1.1, vjust = 1.1) +  # Use the same vjust to keep them close to the top
+  scale_fill_manual(values = c("#440154FF", "#21908CFF", "grey")) + 
+  scale_color_manual(values = c("#440154FF", "#21908CFF", "grey")) +
+  ylim(0, 25)  # Extend y-axis to 0.6
+
+ggarrange(a,b,c,d)
+
+```
+
+# Oxytocin, OXTR Methylation, Genotype and their relation to Brain Volume. 
+
+For the genetics project, we have already prepared the brain volumes that are significantly associated with the genotype in FND. Here the table as a summary: 
+
+
+![](/Volumes/T7_Samantha/Analyses/Oxytocin/BrainVolumes.png){width="478"} </br>
+Let's have a look at Oxytocin and the brain volume of some specific ROIs. I just make here really rough models where I include a Oxytocin x OXTR Methylation x Genotype tripple interaciton. We can disentangle this together in the next meeting if needed, but I think it would be nore interessting to focus on fMRI. 
+
+```{r Oxytocin and Brain Volume, echo=FALSE, message=FALSE, warning=FALSE}
+
+attach(OTbrain)
+OTbrain$ctq<-ctq_emoab+ctq_physab+ctq_sexab+ctq_emoneg+ctq_physneg
+
+brain_FND <- filter(OTbrain, group =="FND")
+brain_FND <- merge(brain_FND, dfOT_FND)
+brain_HC <- filter(OTbrain, group =="HC")
+brain_HC <- merge(brain_HC, dfOT_HC)
+
+# With covariates
+print("Amygdala Brain Volume in FND: ")
+OXTRlm <- (lm(formula = AMYG ~Oxytocin*OXTR_CpG_sum*rs53576 + TIV + gender + bdi +stai2 + date_diff + contraception + menopause  + age + ctq,
+             data = brain_FND))
+
+ggplot(brain_FND, aes_string(x = "rs53576", y = "AMYG", fill = "rs53576")) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(y = "Volume", x = "Genotype", title = "Volume") +
+  theme_classic()
+
+
+print("Amygdala Brain Volume in HC: ")
+OXTRlm <- aov(lm(formula = AMYG ~Oxytocin*OXTR_CpG_sum*rs53576 + TIV + gender + bdi +stai2 + date_diff + contraception + menopause  + age + ctq,
+             data = brain_HC))
+
+summary(OXTRlm) 
+
+print("Hippocampus Brain Volume in FND: ")
+OXTRlm <- aov(lm(formula = HIPP ~Oxytocin*OXTR_CpG_sum*rs53576 + TIV + gender + bdi +stai2 + date_diff + contraception + menopause  + age + ctq,
+             data = brain_FND))
+
+summary(OXTRlm) 
+
+print("Hippocampus Brain Volume in HC: ")
+OXTRlm <- aov(lm(formula = HIPP ~Oxytocin*OXTR_CpG_sum*rs53576 + TIV + gender + bdi +stai2 + date_diff + contraception + menopause  + age + ctq,
+             data = brain_HC))
+
+summary(OXTRlm) 
+
+print("Insula Brain Volume in FND: ")
+OXTRlm <- aov(lm(formula = INS ~Oxytocin*OXTR_CpG_sum*rs53576 + TIV + gender + bdi +stai2 + date_diff + contraception + menopause  + age + ctq,
+             data = brain_FND))
+
+summary(OXTRlm) 
+
+print("Insula Brain Volume in HC: ")
+OXTRlm <- aov(lm(formula = INS ~Oxytocin*OXTR_CpG_sum*rs53576 + TIV + gender + bdi +stai2 + date_diff + contraception + menopause  + age + ctq,
+             data = brain_HC))
+
+summary(OXTRlm) 
+
+```
+# Oxytocin and functional connectivity in FND
+
+**What have I done?**</br>
+I calculated functional connectivity according to standard procedures. This gives me - using the AAL atlas 4005 individual brain connections. I then calculate their correlation with Oxytocin connectionwise. This gives me a 90x90 correlation matrix at which the "blobs" show those connections that significantly correlate with OT. 
+
+**Correlations in HC (left) and FND (right)** with a significance level of alpha = 0.01. I am a bit more strict, as we have many connections, FDR however does not need to be applied as these are correlations and not a statistical test. 
+
+
+![](/Volumes/T7_Samantha/Analyses/Oxytocin/FC_Correlation_OT.png){width="478"} </br>
+
+We now further investigate the significant correlations in FND only. 
+![](/Volumes/T7_Samantha/Analyses/Oxytocin/FND_Correlations.png){width="478"} </br>
+The following connections significantly correlate with Oxytocin in FND: 
+
+<li>Frontal_Inf_Oper_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.38256 with p =0.0043048 </li>
+<li>Frontal_Inf_Tri_R - Frontal_Inf_Oper_R with Correlation Coefficient =0.34786 with p =0.0099516</li>
+<li>Olfactory_R - Frontal_Inf_Oper_R with Correlation Coefficient =-0.34842 with p =0.0098263</li>
+<li>Frontal_Mid_Orb_Medial_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.35015 with p =0.009442</li>
+<li>Frontal_Mid_Orb_Medial_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.40187 with p =0.0025944</li>
+<li>Cingulum_Post_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.36745 with p =0.0062697</li>
+<li>Frontal_Mid_Orb_Medial_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.42675 with p =0.001291</li>
+<li>Hippocampus_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.40558 with p =0.0023457</li>
+<li>Frontal_Inf_Oper_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.3679 with p =0.0062008</li>
+<li>Frontal_Inf_Oper_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.3754 with p =0.0051551</li>
+<li>Frontal_Inf_Tri_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.38471 with p =0.0040744</li>
+<li>Frontal_Inf_Oper_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.45634 with p =0.00052391</li>
+<li>Frontal_Inf_Tri_L - Frontal_Inf_Oper_R with Correlation Coefficient =0.3493 with p =0.0096298</li>
+<li>Occipital_Mid_L - Frontal_Inf_Oper_R with Correlation Coefficient =0.36517 with p =0.0066256</li>
+<li>Hippocampus_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.35623 with p =0.0081965</li>
+<li>ParaHippocampal_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.36281 with p =0.007012</li>
+<li>Frontal_Inf_Oper_L - Frontal_Inf_Oper_R with Correlation Coefficient =0.37525 with p =0.0051746</li>
+<li>Parietal_Sup_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.35122 with p =0.0092127</li>
+<li>Caudate_R - Frontal_Inf_Oper_R with Correlation Coefficient =-0.39996 with p =0.0027313</li>
+<li>Precuneus_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.41394 with p =0.0018615</li>
+<li>Olfactory_L - Frontal_Inf_Oper_R with Correlation Coefficient =-0.34835 with p =0.0098423</li>
+
+
+# Session info {.unnumbered}
+
+```{r sessionInfo, echo=FALSE}
+sessionInfo()
+```
